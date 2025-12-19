@@ -1,0 +1,275 @@
+# assign variables
+python_path = "python3"
+
+project_directory = "/wynton/group/capra/projects/neanderthal_ancestry_and_cancer_risk/"
+introgressed_regions_directory = f"{project_directory}data/introgressed_variants/"
+introgressed_variants_directory = f"{project_directory}data/introgressed_variants/"
+EUR_introgressed_regions_directory = f"{introgressed_variants_directory}EUR_regions/"
+EUR_introgressed_variants_directory = f"{introgressed_variants_directory}EUR_variants/"
+
+rsID_mapping_script = f"{project_directory}scripts/introgressed_variants/rsID_mapping.py"
+
+sets = ["Browning_et_al_2018", "Sankararaman_et_al_2016", "Skov_et_al_2020", "Vernot_et_al_2016"]
+rsID_mapping_sets = ["Sankararaman_et_al_2016", "Skov_et_al_2020", "Vernot_et_al_2016"]
+chrs = [str(i) for i in range(1, 23)]
+
+all_populations_outputs = expand(
+	f"{introgressed_variants_directory}{{set}}_introgressed_regions_hg19.bed",
+	set=sets
+) + expand(
+	f"{introgressed_variants_directory}{{set}}_introgressed_variants_hg19.txt",
+	set=sets
+) + expand(
+	 f"{introgressed_variants_directory}{{set}}_introgressed_variants_hg19.bed",
+	set=sets
+) + [
+	f"{introgressed_variants_directory}intersection_all_introgressed_variants_hg19.bed",
+	f"{introgressed_variants_directory}union_all_introgressed_variants_hg19.bed"
+]
+
+EUR_outputs = expand(
+	 f"{EUR_introgressed_regions_directory}{{set}}_EUR_introgressed_regions_hg19.bed",
+	set=rsID_mapping_sets
+) + expand(
+	f"{EUR_introgressed_variants_directory}{{set}}_EUR_introgressed_variants_hg19.txt",
+	set=rsID_mapping_sets
+) + expand(
+	f"{EUR_introgressed_variants_directory}{{set}}_EUR_introgressed_variants_hg19.bed",
+	set=rsID_mapping_sets
+)
+
+# rules
+rule all:
+	input:
+		all_populations_outputs + EUR_outputs
+
+rule retrieve_Browning_et_al_2018_regions_and_variants:
+	output:
+		f"{introgressed_regions_directory}Browning_et_al_2018_introgressed_regions_hg19.bed",
+		f"{introgressed_variants_directory}Browning_et_al_2018_introgressed_variants_hg19.txt",
+		f"{introgressed_variants_directory}Browning_et_al_2018_introgressed_variants_hg19.bed"
+	resources:
+		mem = 5,
+		threads = 1,
+		time = "1:00:00"
+	shell:
+		"touch {output[0]} {output[1]} {output[2]}"
+
+rule retrieve_Sankararaman_et_al_2016_regions:
+	output:
+		all_regions = f"{introgressed_regions_directory}Sankararaman_et_al_2016_introgressed_regions_hg19.bed",
+		EUR_regions = f"{EUR_introgressed_regions_directory}Sankararaman_et_al_2016_EUR_introgressed_regions_hg19.bed"
+	resources:
+		mem = 5,
+		threads = 1,
+		time = "1:00:00"
+	shell:
+		"""
+		tmp_all=$(mktemp)
+		tmp_all_sorted=$(mktemp)
+
+		for population in america centralasia eastasia oceania southasia westeurasia; do
+			for file in /wynton/group/capra/data/Sankararaman_et_al_2016/1/neandertal/$population/summaries/haplotypes/*.thresh-50.length-0.00.haplotypes; do
+				awk '!/^#/ {{print $1,$3-1,$4}}' OFS='\\t' "$file" >> "$tmp_all"
+			done
+		done
+
+		sort -V -k1,1 -k2,2n "$tmp_all" > "$tmp_all_sorted" 
+		bedtools merge -i "$tmp_all_sorted" > {output.all_regions}
+		rm "$tmp_all" "$tmp_all_sorted" 
+
+		awk '!/^#/ {{print $1,$3-1,$4}}' OFS='\\t' /wynton/group/capra/data/Sankararaman_et_al_2016/1/neandertal/westeurasia/summaries/haplotypes/*.thresh-50.length-0.00.haplotypes | sort -V -k1,1 -k2,2n | bedtools merge -i - > {output.EUR_regions}
+		"""
+
+rule retrieve_Vernot_et_al_2016_regions:
+	output:
+		all_regions = f"{introgressed_regions_directory}Vernot_et_al_2016_introgressed_regions_hg19.bed",
+		EUR_regions = f"{EUR_introgressed_regions_directory}Vernot_et_al_2016_EUR_introgressed_regions_hg19.bed"
+	resources:
+		mem = 5,
+		threads = 1,
+		time = "1:00:00"
+	shell:
+		"""
+		cat /wynton/group/capra/data/Vernot_et_al_2016/introgressed_tag_snp_frequencies/all_tag_snps.*.merged.ALL.0.3_R2_cluster.1KG_phase3_essentials.bed | \
+			awk '{{split($16,a,"_"); sub(/^chr/,"",a[1]); print a[1],a[2],a[3]}}' OFS='\\t' - | sort -V -k1,1 -k2,2n | bedtools merge -i - > {output.all_regions}
+		awk '{{split($16,a,"_"); sub(/^chr/,"",a[1]); print a[1],a[2],a[3]}}' OFS='\\t' "/wynton/group/capra/data/Vernot_et_al_2016/introgressed_tag_snp_frequencies/all_tag_snps.EUR.merged.ALL.0.3_R2_cluster.1KG_phase3_essentials.bed" | \
+			sort -V -k1,1 -k2,2n | bedtools merge -i - > {output.EUR_regions}
+		"""
+
+rule retrieve_Sankararaman_et_al_2016_variants:
+	output:
+		all_tmp = temp(f"{introgressed_variants_directory}Sankararaman_et_al_2016_introgressed_variants_hg19.tmp"),
+		EUR_tmp = temp(f"{EUR_introgressed_variants_directory}Sankararaman_et_al_2016_EUR_introgressed_variants_hg19.tmp")
+	resources:
+		mem = 5,
+		threads = 1,
+		time = "1:00:00"
+	shell:
+		"""
+		tmp_all=$(mktemp)
+
+		for population in america centralasia eastasia oceania southasia westeurasia; do
+			for file in /wynton/group/capra/data/Sankararaman_et_al_2016/1/neandertal/$population/summaries/pred.*.thresh-50.length-0.00; do
+				awk '!/^#/ && ($10 > 0.5) {{print $2,$4}}' OFS='\\t' "$file" >> "$tmp_all"
+			done
+		done
+
+		sort -V -k1,1 -k2,2n "$tmp_all" > {output.all_tmp}
+
+		awk '!/^#/ && ($10 > 0.5) {{print $2,$4}}' OFS='\\t' \
+			/wynton/group/capra/data/Sankararaman_et_al_2016/1/neandertal/westeurasia/summaries/pred.*.thresh-50.length-0.00 \
+			| sort -V -k1,1 -k2,2n \
+			> {output.EUR_tmp}
+		"""
+
+rule retrieve_Vernot_et_al_2016_variants:
+	output:
+		all_tmp = temp(f"{introgressed_variants_directory}Vernot_et_al_2016_introgressed_variants_hg19.tmp"),
+		EUR_tmp = temp(f"{EUR_introgressed_variants_directory}Vernot_et_al_2016_EUR_introgressed_variants_hg19.tmp")
+	resources:
+		mem = 5,
+		threads = 1,
+		time = "1:00:00"
+	shell:
+		"""
+		cat /wynton/group/capra/data/Vernot_et_al_2016/introgressed_tag_snp_frequencies/all_tag_snps.*.merged.ALL.0.3_R2_cluster.1KG_phase3_essentials.bed | \
+			awk '{{sub(/^chr/, "", $1); print $1,$3,$4,$5,$14}}' OFS='\\t' - | sort -V -k1,1 -k2,2n | uniq > {output.all_tmp}
+		awk '{{sub(/^chr/, "", $1); print $1,$3,$4,$5,$14}}' OFS='\\t' "/wynton/group/capra/data/Vernot_et_al_2016/introgressed_tag_snp_frequencies/all_tag_snps.EUR.merged.ALL.0.3_R2_cluster.1KG_phase3_essentials.bed" | sort -V -k1,1 -k2,2n > {output.EUR_tmp}
+		"""
+
+rule split_variants_by_chr:
+	input:
+		combined_tmp = f"{introgressed_variants_directory}{{set}}_introgressed_variants_hg19.tmp"
+	output:
+		temp(f"{introgressed_variants_directory}{{set}}_chr{{chr}}_introgressed_variants_hg19.tmp")
+	wildcard_constraints:
+		set="|".join(rsID_mapping_sets),
+		chr="|".join(chrs)
+	resources:
+		mem = 5,
+		threads = 1,
+		time = "1:00:00"
+	shell:
+		"""
+		awk -v chr={wildcards.chr} '$1==chr {{print $0}}' "{input.combined_tmp}" > "{output}"
+		"""
+
+rule split_EUR_variants_by_chr:
+	input:
+		combined_tmp = f"{EUR_introgressed_variants_directory}{{set}}_EUR_introgressed_variants_hg19.tmp"
+	output:
+		temp(f"{EUR_introgressed_variants_directory}{{set}}_chr{{chr}}_EUR_introgressed_variants_hg19.tmp")
+	wildcard_constraints:
+		set="|".join(rsID_mapping_sets),
+		chr="|".join(chrs)
+	resources:
+		mem = 5,
+		threads = 1,
+		time = "1:00:00"
+	shell:
+		"""
+		awk -v chr={wildcards.chr} '$1==chr {{print $0}}' "{input.combined_tmp}" > "{output}"
+		"""
+
+rule rsID_mapping:
+	input:
+		variants = f"{introgressed_variants_directory}{{set}}_chr{{chr}}_introgressed_variants_hg19.tmp",
+		rsID_dict = f"/wynton/group/capra/data/rsID_mapping/gnomad_chr{{chr}}_rsID.pkl.gz"
+	output:
+		mapped = temp(f"{introgressed_variants_directory}{{set}}_chr{{chr}}_introgressed_variants_hg19_with_rsIDs.txt")
+	params:
+		python = python_path,
+		script = rsID_mapping_script
+	resources:
+		mem = 50,
+		threads = 1,
+		time = "1:00:00"
+	shell:
+		"""
+		{params.python} {params.script} \
+			--input {input.variants} \
+			--dict {input.rsID_dict} \
+			--chr {wildcards.chr} \
+			--output {output.mapped}
+	"""
+
+rule rsID_mapping_EUR:
+	input:
+		variants = f"{EUR_introgressed_variants_directory}{{set}}_chr{{chr}}_EUR_introgressed_variants_hg19.tmp",
+		rsID_dict = f"/wynton/group/capra/data/rsID_mapping/gnomad_chr{{chr}}_rsID.pkl.gz"
+	output:
+		mapped = temp(f"{EUR_introgressed_variants_directory}{{set}}_chr{{chr}}_EUR_introgressed_variants_hg19_with_rsIDs.txt")
+	params:
+		python = python_path,
+		script = rsID_mapping_script
+	resources:
+		mem = 50,
+		threads = 1,
+		time = "1:00:00"
+	shell:
+		"""
+		{params.python} {params.script} \
+			--input {input.variants} \
+			--dict {input.rsID_dict} \
+			--chr {wildcards.chr} \
+			--output {output.mapped}
+		"""
+
+rule concat_all_variants:
+	input:
+		lambda wildcards: expand(
+			f"{introgressed_variants_directory}{wildcards.all_set}_chr{{chr}}_introgressed_variants_hg19_with_rsIDs.txt",
+			chr=chrs
+		)
+	output:
+		txt = f"{introgressed_variants_directory}{{all_set}}_introgressed_variants_hg19.txt",
+		bed = f"{introgressed_variants_directory}{{all_set}}_introgressed_variants_hg19.bed"
+	wildcard_constraints:
+		all_set = "|".join(rsID_mapping_sets)
+	resources:
+		mem = 5,
+		threads = 1,
+		time = "1:00:00"
+	shell:
+		"""
+		cat {input} | sort -V -k1,1 -k2,2n > {output.txt}
+		awk '{{print $1,$2-1,$2,$3,$4,$5}}' OFS='\t' {output.txt} > {output.bed}
+		"""
+
+rule concat_EUR_variants:
+	input:
+		lambda wildcards: expand(
+			f"{EUR_introgressed_variants_directory}{wildcards.EUR_set}_chr{{chr}}_EUR_introgressed_variants_hg19_with_rsIDs.txt",
+			chr=chrs
+		)
+	output:
+		txt = f"{EUR_introgressed_variants_directory}{{EUR_set}}_EUR_introgressed_variants_hg19.txt",
+		bed = f"{EUR_introgressed_variants_directory}{{EUR_set}}_EUR_introgressed_variants_hg19.bed"
+	wildcard_constraints:
+		EUR_set = "|".join(rsID_mapping_sets)
+	resources:
+		mem = 5,
+		threads = 1,
+		time = "1:00:00"
+	shell:
+		"""
+		cat {input} | sort -V -k1,1 -k2,2n > {output.txt}
+		awk '{{print $1,$2-1,$2,$3,$4,$5}}' OFS='\t' {output.txt} > {output.bed}
+		"""
+
+rule intersection_and_union:
+	input:
+		variants = expand(f"{introgressed_variants_directory}{{set}}_introgressed_variants_hg19.bed", set=sets)
+	output:
+		intersection = f"{introgressed_variants_directory}intersection_all_introgressed_variants_hg19.bed",
+		union = f"{introgressed_variants_directory}union_all_introgressed_variants_hg19.bed"
+	resources:
+		mem = 5,
+		threads = 1,
+		time = "1:00:00"
+	shell:
+		"""
+		bedtools multiinter -i {input.variants} | awk '($4 == 4) {{print $1,$2,$3}}' OFS='\t' - > {output.intersection}
+		cat {input.variants} | awk '{{print $1,$2,$3}}' OFS='\t' - | sort -V -k1,1 -k2,2n | bedtools merge > {output.union}
+		"""
