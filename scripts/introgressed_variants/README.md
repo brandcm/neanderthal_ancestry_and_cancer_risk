@@ -7,11 +7,13 @@ This directory contains scripts used to retrieve intrgrossed variant data. Pleas
 - `retrieve_introgressed_regions_and_variants_pipeline.sh` is a Snakemake pipeline, which implements `Snakefile` and `rsID_mapping.py` to retrieve the remaining data, perform rsID mapping, concatenate chromosome-level files, and generate an intersection and union of the four variant maps (Browning, Sankararaman, Skov, and Vernot).
 
 These scripts should result in the following outputs in the `/wynton/group/capra/projects/neanderthal_ancestry_and_cancer_risk/data/introgressed_variants/` directory:
-	Browning_et_al_2018_introgressed_regions_hg19.bed
-	Browning_et_al_2018_introgressed_variants_hg19.bed
-	Browning_et_al_2018_introgressed_variants_hg19.txt
-	EUR_regions/
-	EUR_variants/
-	Skov_et_al_2020_introgressed_regions_hg19.bed
-	Skov_et_al_2020_introgressed_variants_hg19.bed
-	Skov_et_al_2020_introgressed_variants_hg19.txt
+```
+Browning_et_al_2018_introgressed_regions_hg19.bed
+Browning_et_al_2018_introgressed_variants_hg19.bed
+Browning_et_al_2018_introgressed_variants_hg19.txt
+EUR_regions/
+EUR_variants/
+Skov_et_al_2020_introgressed_regions_hg19.bed
+Skov_et_al_2020_introgressed_variants_hg19.bed
+Skov_et_al_2020_introgressed_variants_hg19.txt
+```

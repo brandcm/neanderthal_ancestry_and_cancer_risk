@@ -1,0 +1,120 @@
+# assign variables
+python_path = "python3"
+
+project_directory = "/wynton/group/capra/projects/neanderthal_ancestry_and_cancer_risk/"
+summary_stats_directory = f"{project_directory}data/GWAS_summary_stats/"
+pre_rsID_directory = f"{summary_stats_directory}pre_rsIDs/"
+rsID_mapping_directory = "/wynton/group/capra/data/rsID_mapping/"
+preformatted_summary_stats_directory = f"{summary_stats_directory}preformatted_summary_stats/"
+
+format_EUR_breast_cancer_summary_stats_script = f"{project_directory}scripts/GWAS_summary_stats/format_EUR_breast_cancer_summary_stats.py"
+Sakaue_et_al_2020_summary_stats_rsID_mapping_script = f"{project_directory}scripts/GWAS_summary_stats/Sakaue_et_al_2020_summary_stats_rsID_mapping.py"
+prostate_cancer_summary_stats_rsID_mapping_script = f"{project_directory}scripts/GWAS_summary_stats/prostate_cancer_summary_stats_rsID_mapping.py"
+
+EUR_breast_cancer_summary_stats_input = (
+	f"{pre_rsID_directory}breast_cancer_EUR_Zhang_GCST001.txt.gz"
+)
+EUR_breast_cancer_summary_stats_tmp = f"{summary_stats_directory}breast_cancer_EUR_Zhang_GCST001.tmp"
+EUR_breast_cancer_summary_stats_output = (
+	f"{summary_stats_directory}breast_cancer_EUR_Zhang_GCST001.txt.gz"
+)
+
+Sakaue_et_al_2020_summary_stats_input_files = [
+	"endometrial_cancer_EAS_Sakaue_GCST90018618",
+	"esophageal_cancer_EAS_Sakaue_GCST90018621",
+	"gastric_cancer_EAS_Sakaue_GCST90018629",
+	"liver_cancer_EAS_Sakaue_GCST90018583",
+	"lung_cancer_EAS_Sakaue_GCST90018655",
+	"ovarian_cancer_EAS_Sakaue_GCST90018668",
+	"pancreatic_cancer_EAS_Sakaue_GCST90018673",
+	"thyroid_cancer_EAS_Sakaue_GCST90018709"
+]
+
+prostate_cancer_summary_stats_input_files = [
+	"prostate_cancer_EAS_Wang_GCST90274716",
+	"prostate_cancer_EUR_Wang_GCST90274714"
+]
+
+# rules
+rule all:
+	input:
+		EUR_breast_cancer_summary_stats_output,
+		expand(f"{summary_stats_directory}{{GWAS}}.txt.gz", GWAS=Sakaue_et_al_2020_summary_stats_input_files),
+		expand(f"{summary_stats_directory}{{GWAS}}.txt.gz", GWAS=prostate_cancer_summary_stats_input_files)
+
+rule format_EUR_breast_cancer_summary_stats:
+	input:
+		EUR_breast_cancer_summary_stats_input
+	output:
+		EUR_breast_cancer_summary_stats_output
+	params:
+		python = python_path,
+		script = format_EUR_breast_cancer_summary_stats_script,
+		EUR_breast_cancer_summary_stats_tmp = EUR_breast_cancer_summary_stats_tmp
+	resources:
+		mem = 80,
+		threads = 1,
+		time = "2:00:00"
+	shell:
+		"""
+		zcat {input} | tr ' ' '\\t' > {params.EUR_breast_cancer_summary_stats_tmp}
+		{params.python} {params.script} --input {params.EUR_breast_cancer_summary_stats_tmp} --out {output}
+		rm {params.EUR_breast_cancer_summary_stats_tmp}
+		"""
+
+rule prostate_cancer_summary_stats_rsID_mapping:
+	input:
+		summary_stats = lambda wildcards: f"{pre_rsID_directory}{wildcards.GWAS}.txt",
+		rsID_mapping_directory = rsID_mapping_directory
+	output:
+		f"{summary_stats_directory}{{GWAS}}.txt.gz"
+	params:
+		python = python_path,
+		script = prostate_cancer_summary_stats_rsID_mapping_script
+	resources:
+		mem = 80,
+		threads = 1,
+		time = "6:00:00"
+	shell:
+		"""
+		base={wildcards.GWAS}
+		header="{summary_stats_directory}${{base}}_header.txt"
+		body="{summary_stats_directory}${{base}}_body.txt"
+		outfile="{summary_stats_directory}${{base}}.txt"
+
+		head -n 1 {input.summary_stats} > $header
+		tail -n +2 {input.summary_stats} | sort -k1,1 -k2n,2 > $body
+		cat $header $body > $outfile
+
+		{params.python} {params.script} \
+			--input $outfile \
+			--rsID_mapping_directory {input.rsID_mapping_directory} \
+			--chr_column_index 0 \
+			--pos_column_index 1 \
+			--output {output}
+
+		rm $header $body $outfile
+		"""
+
+rule Sakaue_et_al_2020_summary_stats_rsID_mapping:
+	input:
+		summary_stats = lambda wildcards: f"{pre_rsID_directory}{wildcards.GWAS}.txt.gz",
+		rsID_mapping_directory = rsID_mapping_directory
+	output:
+		f"{summary_stats_directory}{{GWAS}}.txt.gz"
+	params:
+		python = python_path,
+		script = Sakaue_et_al_2020_summary_stats_rsID_mapping_script
+	resources:
+		mem = 80,
+		threads = 1,
+		time = "6:00:00"
+	shell:
+		"""
+		{params.python} {params.script} \
+			--input {input.summary_stats} \
+			--rsID_mapping_directory {input.rsID_mapping_directory} \
+			--chr_column_index 0 \
+			--pos_column_index 1 \
+			--output {output}
+		"""
