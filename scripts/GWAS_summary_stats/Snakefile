@@ -1,120 +1,219 @@
-# assign variables
+import yaml
+
+# =============================================================================
+# Variables
+# =============================================================================
+
 python_path = "python3"
 
 project_directory = "/wynton/group/capra/projects/neanderthal_ancestry_and_cancer_risk/"
+scripts_directory = f"{project_directory}scripts/GWAS_summary_stats/"
 summary_stats_directory = f"{project_directory}data/GWAS_summary_stats/"
-pre_rsID_directory = f"{summary_stats_directory}pre_rsIDs/"
-rsID_mapping_directory = "/wynton/group/capra/data/rsID_mapping/"
-preformatted_summary_stats_directory = f"{summary_stats_directory}preformatted_summary_stats/"
+downloads_directory = f"{summary_stats_directory}downloads/"
+tmp_directory = f"{summary_stats_directory}tmp/"      # intermediates, removed by Snakemake after use
+logs_directory = f"{summary_stats_directory}logs/"    # liftOver records of unconverted positions
 
-format_EUR_breast_cancer_summary_stats_script = f"{project_directory}scripts/GWAS_summary_stats/format_EUR_breast_cancer_summary_stats.py"
-Sakaue_et_al_2020_summary_stats_rsID_mapping_script = f"{project_directory}scripts/GWAS_summary_stats/Sakaue_et_al_2020_summary_stats_rsID_mapping.py"
-prostate_cancer_summary_stats_rsID_mapping_script = f"{project_directory}scripts/GWAS_summary_stats/prostate_cancer_summary_stats_rsID_mapping.py"
+# external data
+rsid_mapping_directory = "/wynton/group/capra/data/gnomAD_v2.1.1_PASS_SNVs_chr_pos_rsID_mapping/"
+gwas_metadata_file = f"{project_directory}data/metadata/cancer_GWAS_metadata.yaml"
+liftover = "/wynton/group/capra/bin/liftOver/liftOver"
+hg38_to_hg19_chain = "/wynton/group/capra/bin/liftOver/hg38ToHg19.over.chain.gz"
 
-EUR_breast_cancer_summary_stats_input = (
-	f"{pre_rsID_directory}breast_cancer_EUR_Zhang_GCST001.txt.gz"
-)
-EUR_breast_cancer_summary_stats_tmp = f"{summary_stats_directory}breast_cancer_EUR_Zhang_GCST001.tmp"
-EUR_breast_cancer_summary_stats_output = (
-	f"{summary_stats_directory}breast_cancer_EUR_Zhang_GCST001.txt.gz"
-)
+# scripts
+format_breast_cancer_script = f"{scripts_directory}format_eur_breast_cancer_summary_stats.py"
+rsid_mapping_script = f"{scripts_directory}summary_stats_rsid_mapping.py"
+harmonize_script = f"{scripts_directory}harmonize_effect_sizes.py"
 
-Sakaue_et_al_2020_summary_stats_input_files = [
-	"endometrial_cancer_EAS_Sakaue_GCST90018618",
-	"esophageal_cancer_EAS_Sakaue_GCST90018621",
-	"gastric_cancer_EAS_Sakaue_GCST90018629",
-	"liver_cancer_EAS_Sakaue_GCST90018583",
-	"lung_cancer_EAS_Sakaue_GCST90018655",
-	"ovarian_cancer_EAS_Sakaue_GCST90018668",
-	"pancreatic_cancer_EAS_Sakaue_GCST90018673",
-	"thyroid_cancer_EAS_Sakaue_GCST90018709"
+# GWAS
+with open(gwas_metadata_file) as f:
+    gwas_metadata = yaml.safe_load(f)
+gwass = list(gwas_metadata.keys())
+
+breast_cancer_gwass = ["breast_cancer_EUR_Zhang_GCST001"]
+prostate_cancer_gwass = [
+    "prostate_cancer_EAS_Wang_GCST90274716",
+    "prostate_cancer_EUR_Wang_GCST90274714"
+]
+sakaue_gwass = [
+    "endometrial_cancer_EAS_Sakaue_GCST90018618",
+    "esophageal_cancer_EAS_Sakaue_GCST90018621",
+    "gastric_cancer_EAS_Sakaue_GCST90018629",
+    "liver_cancer_EAS_Sakaue_GCST90018583",
+    "lung_cancer_EAS_Sakaue_GCST90018655",
+    "ovarian_cancer_EAS_Sakaue_GCST90018668",
+    "pancreatic_cancer_EAS_Sakaue_GCST90018673",
+    "thyroid_cancer_EAS_Sakaue_GCST90018709"
 ]
 
-prostate_cancer_summary_stats_input_files = [
-	"prostate_cancer_EAS_Wang_GCST90274716",
-	"prostate_cancer_EUR_Wang_GCST90274714"
-]
+# GWAS that need formatting or rsID mapping before harmonization; the rest are harmonized as downloaded
+preprocessed_gwass = breast_cancer_gwass + prostate_cancer_gwass + sakaue_gwass
 
-# rules
+# GWAS on hg38 (per the metadata) are also lifted to hg19, the build of the LD panel and introgression maps
+hg38_gwass = [gwas for gwas, metadata in gwas_metadata.items() if metadata.get("assembly") == "hg38"]
+
+# =============================================================================
+# Final outputs
+# =============================================================================
+
+harmonized_outputs = expand(f"{summary_stats_directory}{{gwas}}.txt.gz", gwas = gwass)
+lifted_outputs = expand(f"{summary_stats_directory}{{gwas}}_hg19.txt.gz", gwas = hg38_gwass)
+
+# =============================================================================
+# Rules
+# Resources: mem is GB per thread (SGE h_vmem / mem_free are per slot), time is h_rt.
+# =============================================================================
+
 rule all:
-	input:
-		EUR_breast_cancer_summary_stats_output,
-		expand(f"{summary_stats_directory}{{GWAS}}.txt.gz", GWAS=Sakaue_et_al_2020_summary_stats_input_files),
-		expand(f"{summary_stats_directory}{{GWAS}}.txt.gz", GWAS=prostate_cancer_summary_stats_input_files)
+    input:
+        harmonized_outputs + lifted_outputs
 
-rule format_EUR_breast_cancer_summary_stats:
-	input:
-		EUR_breast_cancer_summary_stats_input
-	output:
-		EUR_breast_cancer_summary_stats_output
-	params:
-		python = python_path,
-		script = format_EUR_breast_cancer_summary_stats_script,
-		EUR_breast_cancer_summary_stats_tmp = EUR_breast_cancer_summary_stats_tmp
-	resources:
-		mem = 80,
-		threads = 1,
-		time = "2:00:00"
-	shell:
-		"""
-		zcat {input} | tr ' ' '\\t' > {params.EUR_breast_cancer_summary_stats_tmp}
-		{params.python} {params.script} --input {params.EUR_breast_cancer_summary_stats_tmp} --out {output}
-		rm {params.EUR_breast_cancer_summary_stats_tmp}
-		"""
+# --- preprocessing ---
 
-rule prostate_cancer_summary_stats_rsID_mapping:
-	input:
-		summary_stats = lambda wildcards: f"{pre_rsID_directory}{wildcards.GWAS}.txt",
-		rsID_mapping_directory = rsID_mapping_directory
-	output:
-		f"{summary_stats_directory}{{GWAS}}.txt.gz"
-	params:
-		python = python_path,
-		script = prostate_cancer_summary_stats_rsID_mapping_script
-	resources:
-		mem = 80,
-		threads = 1,
-		time = "6:00:00"
-	shell:
-		"""
-		base={wildcards.GWAS}
-		header="{summary_stats_directory}${{base}}_header.txt"
-		body="{summary_stats_directory}${{base}}_body.txt"
-		outfile="{summary_stats_directory}${{base}}.txt"
+rule format_breast_cancer_summary_stats:
+    input:
+        f"{downloads_directory}{{gwas}}_initial.txt.gz"
+    output:
+        temp(f"{tmp_directory}{{gwas}}_with_rsIDs.txt.gz")
+    wildcard_constraints:
+        gwas = "|".join(breast_cancer_gwass)
+    params:
+        python = python_path,
+        script = format_breast_cancer_script
+    resources:
+        mem = 8,
+        time = "2:00:00"
+    shell:
+        """
+        {params.python} {params.script} --input {input} --output {output}
+        """
 
-		head -n 1 {input.summary_stats} > $header
-		tail -n +2 {input.summary_stats} | sort -k1,1 -k2n,2 > $body
-		cat $header $body > $outfile
+rule sort_prostate_cancer_summary_stats:
+    input:
+        f"{downloads_directory}{{gwas}}_initial.txt.gz"
+    output:
+        temp(f"{tmp_directory}{{gwas}}_sorted.tmp")
+    wildcard_constraints:
+        gwas = "|".join(prostate_cancer_gwass)
+    threads: 4
+    resources:
+        mem = 5,
+        time = "1:00:00"
+    shell:
+        """
+        # keep the header, sort the body by chromosome then position
+        (
+            zcat {input} | sed -n '1p'
+            zcat {input} | tail -n +2 | sort --parallel={threads} -k1,1 -k2,2n
+        ) > {output}
+        """
 
-		{params.python} {params.script} \
-			--input $outfile \
-			--rsID_mapping_directory {input.rsID_mapping_directory} \
-			--chr_column_index 0 \
-			--pos_column_index 1 \
-			--output {output}
+rule rsid_mapping:
+    input:
+        summary_stats = lambda wildcards: (
+            f"{tmp_directory}{wildcards.gwas}_sorted.tmp" if wildcards.gwas in prostate_cancer_gwass
+            else f"{downloads_directory}{wildcards.gwas}_initial.txt.gz"
+        ),
+        rsid_maps = rsid_mapping_directory
+    output:
+        temp(f"{tmp_directory}{{gwas}}_with_rsIDs.txt.gz")
+    wildcard_constraints:
+        gwas = "|".join(prostate_cancer_gwass + sakaue_gwass)
+    params:
+        python = python_path,
+        script = rsid_mapping_script
+    resources:
+        mem = 80,
+        time = "6:00:00"
+    shell:
+        """
+        {params.python} {params.script} \
+            --input {input.summary_stats} \
+            --rsid_mapping_directory {input.rsid_maps} \
+            --chr_column_index 0 \
+            --pos_column_index 1 \
+            --output {output}
+        """
 
-		rm $header $body $outfile
-		"""
+# --- harmonization ---
 
-rule Sakaue_et_al_2020_summary_stats_rsID_mapping:
-	input:
-		summary_stats = lambda wildcards: f"{pre_rsID_directory}{wildcards.GWAS}.txt.gz",
-		rsID_mapping_directory = rsID_mapping_directory
-	output:
-		f"{summary_stats_directory}{{GWAS}}.txt.gz"
-	params:
-		python = python_path,
-		script = Sakaue_et_al_2020_summary_stats_rsID_mapping_script
-	resources:
-		mem = 80,
-		threads = 1,
-		time = "6:00:00"
-	shell:
-		"""
-		{params.python} {params.script} \
-			--input {input.summary_stats} \
-			--rsID_mapping_directory {input.rsID_mapping_directory} \
-			--chr_column_index 0 \
-			--pos_column_index 1 \
-			--output {output}
-		"""
+rule harmonize_effect_sizes:
+    input:
+        lambda wildcards: (
+            f"{tmp_directory}{wildcards.gwas}_with_rsIDs.txt.gz" if wildcards.gwas in preprocessed_gwass
+            else f"{downloads_directory}{wildcards.gwas}_initial.txt.gz"
+        )
+    output:
+        f"{summary_stats_directory}{{gwas}}.txt.gz"
+    wildcard_constraints:
+        gwas = "|".join(gwass)
+    params:
+        python = python_path,
+        script = harmonize_script,
+        beta_column = lambda wildcards: gwas_metadata[wildcards.gwas]["beta_column"],
+        se_column = lambda wildcards: gwas_metadata[wildcards.gwas]["standard_error_column"],
+        p_value_column = lambda wildcards: gwas_metadata[wildcards.gwas]["p_value_column"]
+    resources:
+        mem = 20,
+        time = "6:00:00"
+    shell:
+        """
+        {params.python} {params.script} \
+            --input {input} \
+            --beta_column "{params.beta_column}" \
+            --se_column "{params.se_column}" \
+            --p_value_column "{params.p_value_column}" \
+            --output {output}
+        """
+
+# --- liftover ---
+
+rule lift_over_summary_stats:
+    input:
+        f"{summary_stats_directory}{{gwas}}.txt.gz"
+    output:
+        lifted = f"{summary_stats_directory}{{gwas}}_hg19.txt.gz",
+        unlifted = f"{logs_directory}{{gwas}}_hg38.unlifted"
+    wildcard_constraints:
+        gwas = "|".join(hg38_gwass)
+    params:
+        liftover = liftover,
+        chain = hg38_to_hg19_chain,
+        chr_column = lambda wildcards: gwas_metadata[wildcards.gwas]["chr_column"],
+        pos_column = lambda wildcards: gwas_metadata[wildcards.gwas]["pos_column"]
+    resources:
+        mem = 10,
+        time = "4:00:00"
+    shell:
+        """
+        tmp_dir=$(mktemp -d)
+        trap 'rm -rf "$tmp_dir"' EXIT
+
+        # hg38 BED (chr-prefixed for the UCSC chain) followed by the full original row
+        zcat {input} \
+        | awk -v chr_col="{params.chr_column}" -v pos_col="{params.pos_column}" -v header="$tmp_dir/header.txt" '
+            BEGIN {{FS = OFS = "\\t"}}
+            NR == 1 {{print > header; for (i = 1; i <= NF; i++) {{if ($i == chr_col) c = i; if ($i == pos_col) p = i}}; next}}
+            $p ~ /^[0-9]+$/ {{chr = $c; sub(/^chr/, "", chr); print "chr" chr, $p - 1, $p, $0}}
+        ' > "$tmp_dir/hg38.bed"
+
+        # -bedPlus=3 -tab: lift the first three columns, carry the rest of the row through unchanged
+        {params.liftover} -bedPlus=3 -tab "$tmp_dir/hg38.bed" {params.chain} "$tmp_dir/hg19.bed" {output.unlifted}
+
+        # put the hg19 position back in the position column; drop rows that changed chromosome
+        (
+            cat "$tmp_dir/header.txt"
+            awk -v chr_col="{params.chr_column}" -v pos_col="{params.pos_column}" '
+                BEGIN {{FS = OFS = "\\t"}}
+                NR == FNR {{for (i = 1; i <= NF; i++) {{if ($i == chr_col) c = i; if ($i == pos_col) p = i}}; next}}
+                {{
+                    lifted_chr = $1; original_chr = $(c + 3)
+                    sub(/^chr/, "", lifted_chr); sub(/^chr/, "", original_chr)
+                    if (lifted_chr != original_chr) next
+                    $(p + 3) = $3
+                    line = $4
+                    for (i = 5; i <= NF; i++) line = line OFS $i
+                    print line
+                }}
+            ' "$tmp_dir/header.txt" "$tmp_dir/hg19.bed"
+        ) | gzip > {output.lifted}
+        """
