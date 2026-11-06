@@ -1,0 +1,16 @@
+# Snakemake profile for Wynton (SGE). Used by submit.sh in each pipeline directory.
+# Jobs record their own exit code (sge_run.sh), so status checks avoid qacct, which is slow on Wynton.
+executor: cluster-generic
+cluster-generic-submit-cmd: >-
+  /wynton/group/capra/projects/neanderthal_ancestry_and_cancer_risk/scripts/profiles/sge/sge_submit.sh
+  -cwd -V -N {rule} -o logs/ -e logs/
+  -pe smp {threads}
+  -l h_rt={resources.time}
+  -l h_vmem={resources.mem}G
+  -l mem_free={resources.mem}G
+cluster-generic-status-cmd: /wynton/group/capra/projects/neanderthal_ancestry_and_cancer_risk/scripts/profiles/sge/sge_status.sh
+cluster-generic-cancel-cmd: qdel
+jobs: 25
+scheduler: greedy
+latency-wait: 60
+rerun-incomplete: true

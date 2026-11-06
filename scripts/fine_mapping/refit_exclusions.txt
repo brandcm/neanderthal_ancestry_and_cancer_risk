@@ -1,0 +1,9 @@
+# Loci whose refits have been run and did not resolve. A refit that ran and
+# failed to converge will not converge with more time, so these are not
+# retried; loci whose refits never finished are absent from this file and
+# will run. Remove a row to try a locus again.
+config_key	locus_id	ancestry_group	reason
+colorectal_cancer_EUR_Fernandez-Rozadilla_GCST90255675	6_32431488	EUR	L10 refit abandoned after 9h
+prostate_cancer_EUR_Wang_GCST90274714	11_125335677	EUR	L10 refit abandoned after 9h
+prostate_cancer_EUR_Wang_GCST90274714	18_76715856	EUR	L10 refit abandoned after 9h
+prostate_cancer_EUR_Wang_GCST90274714	20_62234688	EUR	L10 refit abandoned after 9h

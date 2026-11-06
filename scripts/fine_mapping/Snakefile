@@ -1,0 +1,556 @@
+import os
+
+import pandas as pd
+import yaml
+
+# =============================================================================
+# Variables
+# =============================================================================
+
+python_path = "python3"
+
+project_directory = "/wynton/group/capra/projects/neanderthal_ancestry_and_cancer_risk/"
+scripts_directory = f"{project_directory}scripts/fine_mapping/"
+
+# R runs through a wrapper, since Snakemake runs from the snakemake environment and
+# R lives in the rgenomics one
+rscript_path = f"{scripts_directory}run_rscript.sh"
+
+fine_mapping_directory = f"{project_directory}data/fine_mapping/"
+windows_directory = f"{fine_mapping_directory}windows/"
+results_directory = f"{fine_mapping_directory}results/"
+refits_directory = f"{fine_mapping_directory}refits/"
+
+# external data
+gwas_metadata_file = f"{project_directory}data/metadata/cancer_GWAS_metadata.yaml"
+significant_introgressed_variants_file = (
+    f"{project_directory}data/significant_GWAS_variants/introgressed_variants/"
+    "variants/significant_introgressed_GWAS_variants.txt.gz"
+)
+adaptive_introgression_file = (
+    f"{project_directory}data/adaptive_introgression/"
+    "Iasi_et_al_2025_high_frequency_ancient_modern_regions.bed"
+)
+
+# scripts
+identify_loci_script    = f"{scripts_directory}identify_fine_mapping_loci.py"
+extract_windows_script  = f"{scripts_directory}extract_locus_windows.R"
+fine_map_locus_script   = f"{scripts_directory}fine_map_locus.R"
+fine_mapping_script     = f"{scripts_directory}fine_mapping.R"
+refit_script            = f"{scripts_directory}refit_nonconverged.R"
+compare_refits_script   = f"{scripts_directory}compare_refits.R"
+summarize_script        = f"{scripts_directory}summarize_fine_mapping_results.R"
+select_fits_script      = f"{scripts_directory}select_fits.R"
+deduplicate_script      = f"{scripts_directory}deduplicate_credible_sets.R"
+annotate_genes_script   = f"{scripts_directory}annotate_credible_sets.R"
+adaptive_overlap_script = f"{scripts_directory}intersect_adaptive_introgression.R"
+
+# fine-mapping defaults. window_size is in kb and is read per locus from the loci
+# table, so a locus is rerun with a wider window by editing that table rather than
+# this file. L is read from the table's L column when it has one.
+default_window_size = 1000
+default_L = 10
+
+# the windows are extracted at twice the half-window the loci table asks for, so a
+# locus can be rerun with up to double the window without re-reading the GWAS
+window_margin_factor = 2
+
+# credible sets from different index windows in the same GWAS whose variant sets
+# overlap at or above this Jaccard index are treated as one signal
+jaccard_threshold = 0.5
+
+ancestry_groups = ["AFR", "AMR", "EAS", "EUR", "SAS"]
+
+with open(gwas_metadata_file) as f:
+    gwas_metadata = yaml.safe_load(f)
+
+# SuSiE needs effect sizes to turn the summary statistics into z scores, so a study
+# that reports none cannot be fine-mapped. identify_fine_mapping_loci.py applies the
+# same filter, so such a study contributes to the association-level counts but to no
+# locus here.
+gwass = [gwas for gwas, metadata in gwas_metadata.items() if metadata["effect_sizes"]]
+
+wildcard_constraints:
+    gwas = "|".join(gwass),
+    locus_id = r"[0-9XY]+_[0-9]+",
+    ancestry_group = "|".join(ancestry_groups),
+    L = r"[0-9]+"
+
+# =============================================================================
+# Loci and refits
+#
+# Two things are not known when the pipeline starts, so each is a checkpoint and
+# everything downstream reads the table it writes:
+#
+#   identify_loci      which loci exist, from the significant introgressed variants
+#   list_refit_tasks   which fits did not converge, and at which L to refit them
+#
+# A dry run therefore plans only as far as the next checkpoint. That is expected:
+# the job count grows twice as the pipeline proceeds.
+# =============================================================================
+
+loci_file = f"{fine_mapping_directory}fine_mapping_loci.txt"
+locus_summary_file = f"{fine_mapping_directory}locus_summary.txt"
+refit_tasks_file = f"{fine_mapping_directory}refit_tasks.txt"
+fit_status_file = f"{fine_mapping_directory}fit_status.txt"
+refit_comparison_file = f"{fine_mapping_directory}refit_comparison.txt"
+
+# Per-locus settings that override the loci table, recorded here rather than edited
+# into the generated table so that they survive identify_loci being rerun. A blank
+# cell leaves that setting to the table.
+overrides_file = f"{scripts_directory}locus_overrides.txt"
+
+# Loci whose refits have been run and did not resolve, so that rerunning the
+# pipeline does not spend another long job per locus rediscovering it. A refit that
+# ran and failed to converge will not converge with more time; only loci whose
+# refits never finished should be retried, and those are absent from this file.
+refit_exclusions_file = f"{scripts_directory}refit_exclusions.txt"
+
+_cache = {}
+
+
+def load_loci():
+    """The loci table, read once the checkpoint has produced it."""
+    if "loci" not in _cache:
+        path = checkpoints.identify_loci.get().output[0]
+        _cache["loci"] = pd.read_csv(path, sep="\t")
+    return _cache["loci"]
+
+
+def load_refit_tasks():
+    """The refit tasks, read once the fits have been summarized. One row per locus
+    and L to try; empty when every locus converged."""
+    if "refit_tasks" not in _cache:
+        path = checkpoints.list_refit_tasks.get().output[0]
+        _cache["refit_tasks"] = pd.read_csv(path, sep="\t")
+    return _cache["refit_tasks"]
+
+
+def load_overrides():
+    """The per-locus overrides, keyed by GWAS and locus."""
+    if "overrides" not in _cache:
+        if os.path.exists(overrides_file):
+            overrides = pd.read_csv(overrides_file, sep="\t")
+            overrides = overrides.set_index(["config_key", "locus_id"])
+        else:
+            overrides = None
+        _cache["overrides"] = overrides
+    return _cache["overrides"]
+
+
+def load_refit_exclusions():
+    """Loci whose refits are known not to resolve, as (GWAS, locus, ancestry group)."""
+    if "refit_exclusions" not in _cache:
+        if os.path.exists(refit_exclusions_file):
+            exclusions = pd.read_csv(refit_exclusions_file, sep="\t", comment="#")
+            _cache["refit_exclusions"] = set(
+                zip(
+                    exclusions["config_key"],
+                    exclusions["locus_id"].astype(str),
+                    exclusions["ancestry_group"],
+                )
+            )
+        else:
+            _cache["refit_exclusions"] = set()
+    return _cache["refit_exclusions"]
+
+
+def locus_setting(row, column, default):
+    """One locus's setting: the override if there is one, then the loci table, then
+    the default."""
+    overrides = load_overrides()
+    if overrides is not None and column in overrides.columns:
+        key = (row["config_key"], str(row["locus_id"]))
+        if key in overrides.index:
+            override = overrides.loc[key, column]
+            if not pd.isna(override):
+                return int(override)
+
+    value = row.get(column, None)
+    if value is None or pd.isna(value):
+        return default
+    return int(value)
+
+
+def locus_row(wildcards):
+    """The one row of the loci table for a locus."""
+    loci = load_loci()
+    rows = loci[
+        (loci["config_key"] == wildcards.gwas)
+        & (loci["locus_id"].astype(str) == wildcards.locus_id)
+        & (loci["ancestry_group"] == wildcards.ancestry_group)
+    ]
+    if len(rows) != 1:
+        raise ValueError(
+            f"Expected one row for {wildcards.gwas} {wildcards.locus_id} "
+            f"{wildcards.ancestry_group}, found {len(rows)}."
+        )
+    return rows.iloc[0]
+
+
+def locus_results(wildcards):
+    """One result file per locus."""
+    loci = load_loci()
+    return [
+        f"{results_directory}{row.config_key}/{row.locus_id}_{row.ancestry_group}.rds"
+        for row in loci.itertuples()
+    ]
+
+
+def refit_results(wildcards):
+    """One refit per task, less the loci already known not to resolve. The task table
+    carries the L for each, so which L values are tried is decided by
+    refit_nonconverged.R rather than here."""
+    tasks = load_refit_tasks()
+    excluded = load_refit_exclusions()
+    return [
+        f"{refits_directory}{row.config_key}/"
+        f"{row.locus_id}_{row.ancestry_group}_L{row.L}.rds"
+        for row in tasks.itertuples()
+        if (row.config_key, str(row.locus_id), row.ancestry_group) not in excluded
+    ]
+
+
+def gwas_window_file(wildcards):
+    """The extracted windows for the GWAS a locus belongs to."""
+    return f"{windows_directory}{wildcards.gwas}_windows.txt.gz"
+
+
+def summary_statistics(wildcards):
+    """Harmonized summary statistics, as the metadata records them."""
+    return gwas_metadata[wildcards.gwas]["input"]
+
+# =============================================================================
+# Final outputs
+#
+# The credible set tables come in three stages, each named for what has happened
+# to them, and each written as a summary and a variant-level table so that nothing
+# downstream has to pair a summary with variants from a different stage:
+#
+#   credible_set_*.txt                every credible set from every fit
+#   credible_set_*_selected.txt       one fit per locus; unresolved loci dropped
+#   credible_set_*_deduplicated.txt   signals collapsed across index windows
+#
+# Two further files name the two different Neanderthal subsets, which are not the
+# same thing. Both are deduplicated and restricted to genome-wide significant,
+# representative signals, and they differ only in the posterior threshold:
+#
+#   neanderthal_credible_sets.txt     signals containing at least one Neanderthal
+#                                     variant
+#   neanderthal_majority_signals.txt  signals whose posterior is mostly on
+#                                     Neanderthal variants
+#
+# The second is the manuscript's headline set. Applying the posterior threshold to
+# an earlier stage instead gives 42 signals rather than 30, because a signal
+# recovered through two overlapping index windows is counted twice there.
+# =============================================================================
+
+raw_summary_tables = [
+    locus_summary_file,
+    f"{fine_mapping_directory}credible_set_summary.txt",
+    f"{fine_mapping_directory}credible_set_variants.txt",
+    f"{fine_mapping_directory}kriging_flagged_variants.txt",
+]
+
+selected_tables = [
+    f"{fine_mapping_directory}credible_set_summary_selected.txt",
+    f"{fine_mapping_directory}credible_set_variants_selected.txt",
+]
+
+deduplicated_tables = [
+    f"{fine_mapping_directory}credible_set_summary_deduplicated.txt",
+    f"{fine_mapping_directory}credible_set_variants_deduplicated.txt",
+    f"{fine_mapping_directory}neanderthal_credible_sets.txt",
+    f"{fine_mapping_directory}neanderthal_majority_signals.txt",
+]
+
+gene_table = f"{fine_mapping_directory}credible_set_genes.txt"
+adaptive_overlap_table = f"{fine_mapping_directory}adaptive_introgression_overlap.txt"
+
+# =============================================================================
+# Rules
+# Resources: mem is GB per thread (SGE h_vmem / mem_free are per slot), time is h_rt.
+# =============================================================================
+
+rule all:
+    input:
+        [fit_status_file, refit_comparison_file, gene_table, adaptive_overlap_table]
+        + raw_summary_tables
+        + selected_tables
+        + deduplicated_tables
+
+# --- loci ---
+
+checkpoint identify_loci:
+    input:
+        metadata = gwas_metadata_file,
+        variants = significant_introgressed_variants_file
+    output:
+        loci_file
+    params:
+        python = python_path,
+        script = identify_loci_script,
+        window_size = default_window_size
+    threads: 1
+    resources:
+        mem = 8,
+        time = "1:00:00"
+    shell:
+        """
+        {params.python} {params.script} \
+            --input {input.variants} \
+            --metadata {input.metadata} \
+            --window_size {params.window_size} \
+            --output {output}
+        """
+
+# --- windows ---
+
+rule extract_locus_windows:
+    input:
+        summary_statistics = summary_statistics,
+        loci = ancient(loci_file)
+    output:
+        f"{windows_directory}{{gwas}}_windows.txt.gz"
+    params:
+        rscript = rscript_path,
+        script = extract_windows_script,
+        metadata = gwas_metadata_file,
+        margin_factor = window_margin_factor
+    threads: 1
+    resources:
+        mem = 32,
+        time = "4:00:00"
+    shell:
+        """
+        {params.rscript} {params.script} \
+            --config_key {wildcards.gwas} \
+            --metadata {params.metadata} \
+            --loci {input.loci} \
+            --margin_factor {params.margin_factor} \
+            --output {output}
+        """
+
+# --- fine mapping ---
+
+rule fine_map_locus:
+    input:
+        windows = gwas_window_file,
+        loci = ancient(loci_file),
+        overrides = ancient(overrides_file),
+        fitting_code = fine_mapping_script
+    output:
+        f"{results_directory}{{gwas}}/{{locus_id}}_{{ancestry_group}}.rds"
+    params:
+        rscript = rscript_path,
+        script = fine_map_locus_script,
+        metadata = gwas_metadata_file,
+        lead_rsid = lambda wildcards: locus_row(wildcards)["lead_rsid"],
+        n_samples = lambda wildcards: int(locus_row(wildcards)["n_samples"]),
+        window_size = lambda wildcards: locus_setting(
+            locus_row(wildcards), "window_size", default_window_size
+        ),
+        L = lambda wildcards: locus_setting(locus_row(wildcards), "L", default_L)
+    threads: 1
+    resources:
+        # the LD matrix is the memory cost and grows with the square of the window's
+        # variant count, which varies by two orders of magnitude across these loci, so
+        # memory grows with each attempt rather than being set high for every job
+        mem = lambda wildcards, attempt: 24 * attempt,
+        # the kriging diagnostic eigendecomposes the LD matrix, so time grows with
+        # the cube of the window's variant count; a widened window can take hours
+        time = lambda wildcards, attempt: f"{8 * attempt}:00:00"
+    shell:
+        """
+        {params.rscript} {params.script} \
+            --config_key {wildcards.gwas} \
+            --ancestry_group {wildcards.ancestry_group} \
+            --locus_id {wildcards.locus_id} \
+            --lead_rsid {params.lead_rsid} \
+            --n_samples {params.n_samples} \
+            --window_size {params.window_size} \
+            --L {params.L} \
+            --windows {input.windows} \
+            --metadata {params.metadata} \
+            --output {output}
+        """
+
+# --- summaries of every fit ---
+#
+# This comes before the refits, because which loci need refitting is read from
+# locus_summary.txt's converged column.
+
+rule summarize_results:
+    input:
+        locus_results
+    output:
+        raw_summary_tables
+    params:
+        rscript = rscript_path,
+        script = summarize_script,
+        results_directory = results_directory,
+        output_directory = fine_mapping_directory
+    threads: 1
+    resources:
+        mem = 16,
+        time = "2:00:00"
+    shell:
+        """
+        {params.rscript} {params.script} \
+            --results_directory {params.results_directory} \
+            --output_directory {params.output_directory}
+        """
+
+# --- refits ---
+
+checkpoint list_refit_tasks:
+    input:
+        locus_summary = locus_summary_file,
+        loci = ancient(loci_file)
+    output:
+        refit_tasks_file
+    params:
+        rscript = rscript_path,
+        script = refit_script
+    threads: 1
+    resources:
+        mem = 16,
+        time = "1:00:00"
+    shell:
+        """
+        {params.rscript} {params.script} --list_output {output}
+        """
+
+rule refit_locus:
+    input:
+        original = f"{results_directory}{{gwas}}/{{locus_id}}_{{ancestry_group}}.rds",
+        windows = gwas_window_file,
+        tasks = ancient(refit_tasks_file),
+        fitting_code = fine_mapping_script
+    output:
+        f"{refits_directory}{{gwas}}/{{locus_id}}_{{ancestry_group}}_L{{L}}.rds"
+    params:
+        rscript = rscript_path,
+        script = refit_script
+    threads: 1
+    resources:
+        # refine = TRUE refits repeatedly from perturbed initializations, so these
+        # cost several times the original fit. The array job these replace asked for
+        # 48G and 12h, which was not enough for the L = 10 refits at three loci, so
+        # the base starts above it rather than rediscovering the limit on a retry.
+        mem = lambda wildcards, attempt: 48 * attempt,
+        time = lambda wildcards, attempt: f"{24 * attempt}:00:00"
+    shell:
+        """
+        {params.rscript} {params.script} \
+            --config_key {wildcards.gwas} \
+            --ancestry_group {wildcards.ancestry_group} \
+            --locus_id {wildcards.locus_id} \
+            --L {wildcards.L}
+        """
+
+# A diagnostic: the two refits side by side for the loci that needed them.
+# Nothing downstream reads it.
+rule compare_refits:
+    input:
+        locus_summary = locus_summary_file,
+        originals = locus_results,
+        refits = refit_results
+    output:
+        refit_comparison_file
+    params:
+        rscript = rscript_path,
+        script = compare_refits_script
+    threads: 1
+    resources:
+        mem = 16,
+        time = "2:00:00"
+    shell:
+        """
+        {params.rscript} {params.script}
+        """
+
+# --- one fit per locus ---
+#
+# The original where it converged, otherwise a converged refine = TRUE refit,
+# otherwise the locus is unresolved and contributes to nothing downstream. The
+# choice is recorded in fit_status.txt.
+
+rule select_fits:
+    input:
+        summaries = raw_summary_tables,
+        refits = refit_results
+    output:
+        status = fit_status_file,
+        tables = selected_tables
+    params:
+        rscript = rscript_path,
+        script = select_fits_script
+    threads: 1
+    resources:
+        mem = 16,
+        time = "1:00:00"
+    shell:
+        """
+        {params.rscript} {params.script}
+        """
+
+rule deduplicate_credible_sets:
+    input:
+        selected_tables
+    output:
+        deduplicated_tables
+    params:
+        rscript = rscript_path,
+        script = deduplicate_script,
+        jaccard = jaccard_threshold
+    threads: 1
+    resources:
+        mem = 16,
+        time = "1:00:00"
+    shell:
+        """
+        {params.rscript} {params.script} {params.jaccard}
+        """
+
+# --- annotation and overlaps ---
+#
+# These scripts hold their input and output paths internally, so the rules declare
+# the files for the DAG's sake and call the scripts bare. The paths are therefore
+# recorded in two places; if one moves, both have to change. Giving each script a
+# parse_args like fine_map_locus.R's would remove the duplication.
+
+rule annotate_credible_set_genes:
+    input:
+        deduplicated_tables
+    output:
+        gene_table
+    params:
+        rscript = rscript_path,
+        script = annotate_genes_script
+    threads: 1
+    resources:
+        mem = 16,
+        time = "1:00:00"
+    shell:
+        """
+        {params.rscript} {params.script} --all
+        """
+
+rule intersect_adaptive_introgression:
+    input:
+        tables = deduplicated_tables,
+        regions = adaptive_introgression_file
+    output:
+        adaptive_overlap_table
+    params:
+        rscript = rscript_path,
+        script = adaptive_overlap_script
+    threads: 1
+    resources:
+        mem = 8,
+        time = "1:00:00"
+    shell:
+        """
+        {params.rscript} {params.script}
+        """

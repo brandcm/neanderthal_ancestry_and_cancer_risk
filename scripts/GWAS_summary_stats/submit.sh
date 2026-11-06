@@ -1,0 +1,19 @@
+#!/bin/bash
+#$ -N GWAS_summary_stats
+#$ -M colin.brand@ucsf.edu
+#$ -m ae
+#$ -cwd
+#$ -o logs/
+#$ -e logs/
+#$ -l h_rt=24:00:00
+#$ -l mem_free=4G
+
+# load conda environment
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate snakemake
+
+# per-job SGE logs
+mkdir -p logs
+
+# run
+snakemake --profile ../profiles/sge "$@"

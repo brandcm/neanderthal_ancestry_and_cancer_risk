@@ -1,0 +1,330 @@
+import os
+
+import yaml
+
+# =============================================================================
+# Variables
+# =============================================================================
+
+python_path = "python3"
+
+project_directory = "/wynton/group/capra/projects/neanderthal_ancestry_and_cancer_risk/"
+scripts_directory = f"{project_directory}scripts/significant_GWAS_variants/"
+summary_stats_directory = f"{project_directory}data/GWAS_summary_stats/"
+significant_variants_directory = f"{project_directory}data/significant_GWAS_variants/"
+all_variants_directory = f"{significant_variants_directory}all_variants/"
+introgressed_variants_directory = f"{significant_variants_directory}introgressed_variants/"
+tmp_directory = f"{significant_variants_directory}tmp/"    # intermediates, removed by Snakemake after use
+os.makedirs(tmp_directory, exist_ok=True)
+
+# external data
+ld_reference_panel_directory = f"{project_directory}data/LD_reference_panels/"
+gwas_metadata_file = f"{project_directory}data/metadata/cancer_GWAS_metadata.yaml"
+introgressed_variants_file = f"{project_directory}data/introgressed_variants/merged_introgressed_variants_hg19.txt"
+
+# scripts
+retrieve_significant_variants_script = f"{scripts_directory}retrieve_significant_gwas_variants.py"
+retrieve_significant_introgressed_variants_script = f"{scripts_directory}retrieve_significant_introgressed_gwas_variants.py"
+
+# GWAS
+with open(gwas_metadata_file) as f:
+    gwas_metadata = yaml.safe_load(f)
+gwass = list(gwas_metadata.keys())
+
+# GWAS on hg38 were lifted to hg19 by the GWAS_summary_stats pipeline, which suffixes those files
+hg38_gwass = [gwas for gwas, metadata in gwas_metadata.items() if metadata.get("assembly") == "hg38"]
+
+chromosomes = [str(i) for i in range(1, 23)]
+r2_thresholds = ["0.2", "0.5", "0.8"]
+variant_sets = ["all_variants", "introgressed_variants"]
+
+# the header PLINK writes for a clumping run that produces no clumps
+clumped_header = "\t".join(
+    ["CHR", "F", "SNP", "BP", "P", "TOTAL", "NSIG", "S05", "S01", "S001", "S0001", "SP2"]
+)
+
+wildcard_constraints:
+    gwas = "|".join(gwass),
+    chr = "|".join(chromosomes),
+    r2_threshold = "|".join(r2_thresholds),
+    variant_set = "|".join(variant_sets)
+
+
+def summary_stats(wildcards):
+    """Harmonized hg19 summary statistics for one GWAS."""
+    suffix = "_hg19.txt.gz" if wildcards.gwas in hg38_gwass else ".txt.gz"
+    return f"{summary_stats_directory}{wildcards.gwas}{suffix}"
+
+
+def ld_reference_panel_prefix(wildcards):
+    """PLINK fileset prefix for one GWAS's ancestry group and one chromosome."""
+    ancestry_group = gwas_metadata[wildcards.gwas]["ancestry_group"]
+    return (
+        f"{ld_reference_panel_directory}{ancestry_group}/"
+        f"1000G_{ancestry_group}_chr{wildcards.chr}"
+    )
+
+# =============================================================================
+# Final outputs
+# =============================================================================
+
+variant_counts = f"{significant_variants_directory}summaries/cancer_GWAS_N_SNVs_and_N_significant_SNVs.txt"
+clumped_outputs = expand(
+    f"{significant_variants_directory}{{variant_set}}/LD_clumped/{{gwas}}_r2_{{r2_threshold}}.clumped",
+    variant_set = variant_sets,
+    gwas = gwass,
+    r2_threshold = r2_thresholds
+)
+
+# =============================================================================
+# Rules
+# Resources: mem is GB per thread (SGE h_vmem / mem_free are per slot), time is h_rt.
+# =============================================================================
+
+rule all:
+    input:
+        [variant_counts] + clumped_outputs
+
+# --- significant variants ---
+
+rule retrieve_significant_variants:
+    input:
+        summary_stats = summary_stats
+    output:
+        f"{all_variants_directory}variants/{{gwas}}_hg19_significant_SNVs.txt.gz"
+    params:
+        python = python_path,
+        script = retrieve_significant_variants_script,
+        chr_column = lambda wildcards: gwas_metadata[wildcards.gwas]["chr_column"],
+        pos_column = lambda wildcards: gwas_metadata[wildcards.gwas]["pos_column"],
+        rsid_column = lambda wildcards: gwas_metadata[wildcards.gwas]["rsID_column"],
+        effect_allele_column = lambda wildcards: gwas_metadata[wildcards.gwas]["effect_allele_column"],
+        other_allele_column = lambda wildcards: gwas_metadata[wildcards.gwas]["other_allele_column"],
+        p_value_column = lambda wildcards: gwas_metadata[wildcards.gwas]["p_value_column"]
+    threads: 1
+    resources:
+        mem = 10,
+        time = "2:00:00"
+    shell:
+        """
+        {params.python} {params.script} \
+            --input {input.summary_stats} \
+            --chr_column {params.chr_column} \
+            --pos_column {params.pos_column} \
+            --rsid_column {params.rsid_column} \
+            --effect_allele_column {params.effect_allele_column} \
+            --other_allele_column {params.other_allele_column} \
+            --p_value_column {params.p_value_column} \
+            --output {output}
+        """
+
+rule count_variants:
+    input:
+        summary_stats = summary_stats,
+        significant_variants = f"{all_variants_directory}variants/{{gwas}}_hg19_significant_SNVs.txt.gz"
+    output:
+        temp(f"{tmp_directory}{{gwas}}_variant_counts.tmp")
+    params:
+        effect_allele_column = lambda wildcards: gwas_metadata[wildcards.gwas]["effect_allele_column"],
+        other_allele_column = lambda wildcards: gwas_metadata[wildcards.gwas]["other_allele_column"]
+    threads: 1
+    resources:
+        mem = 2,
+        time = "2:00:00"
+    shell:
+        """
+        # SNVs are variants whose effect and other alleles are both a single base
+        n_snvs=$(
+            zcat {input.summary_stats} \
+            | awk -F'\\t' -v effect="{params.effect_allele_column}" -v other="{params.other_allele_column}" '
+                NR == 1 {{for (i = 1; i <= NF; i++) {{if ($i == effect) e = i; if ($i == other) o = i}}; next}}
+                length($e) == 1 && length($o) == 1 {{n++}}
+                END {{print n + 0}}
+            '
+        )
+        n_significant=$(zcat {input.significant_variants} | tail -n +2 | wc -l)
+
+        printf '%s\\t%s\\t%s\\n' "{wildcards.gwas}" "$n_snvs" "$n_significant" > {output}
+        """
+
+rule concat_variant_counts:
+    input:
+        expand(f"{tmp_directory}{{gwas}}_variant_counts.tmp", gwas = gwass)
+    output:
+        variant_counts
+    threads: 1
+    resources:
+        mem = 2,
+        time = "0:30:00"
+    shell:
+        """
+        (
+            printf 'gwas_file\\tN_GWAS_SNVs\\tN_significant_GWAS_SNVs\\n'
+            cat {input} | sort -k1,1
+        ) > {output}
+        """
+
+rule retrieve_significant_introgressed_variants:
+    input:
+        metadata = gwas_metadata_file,
+        # the script reads every GWAS's significant variants and the introgressed variant table
+        significant_variants = expand(
+            f"{all_variants_directory}variants/{{gwas}}_hg19_significant_SNVs.txt.gz",
+            gwas = gwass
+        ),
+        introgressed_variants = introgressed_variants_file
+    output:
+        summary = f"{introgressed_variants_directory}variants/significant_introgressed_GWAS_variants_summary.txt",
+        variants = f"{introgressed_variants_directory}variants/significant_introgressed_GWAS_variants.txt.gz"
+    params:
+        python = python_path,
+        script = retrieve_significant_introgressed_variants_script,
+        significant_variants_directory = f"{all_variants_directory}variants/",
+        variants = f"{tmp_directory}significant_introgressed_GWAS_variants.txt"
+    threads: 1
+    resources:
+        mem = 10,
+        time = "2:00:00"
+    shell:
+        """
+        {params.python} {params.script} \
+            --metadata {input.metadata} \
+            --introgressed_variants {input.introgressed_variants} \
+            --significant_variants_directory {params.significant_variants_directory} \
+            --summary_output {output.summary} \
+            --variants_output {params.variants}
+
+        gzip -c {params.variants} > {output.variants}
+        rm {params.variants}
+        """
+
+# --- LD clumping ---
+
+rule ld_clump_significant_variants:
+    input:
+        variants = f"{all_variants_directory}variants/{{gwas}}_hg19_significant_SNVs.txt.gz",
+        ld_reference_panel = lambda wildcards: multiext(
+            ld_reference_panel_prefix(wildcards), ".bed", ".bim", ".fam"
+        )
+    output:
+        temp(f"{all_variants_directory}LD_clumped/chromosome_level/{{gwas}}_chr{{chr}}_r2_{{r2_threshold}}.clumped")
+    params:
+        ld_reference_panel = ld_reference_panel_prefix,
+        out_prefix = lambda wildcards, output: output[0].removesuffix(".clumped"),
+        variant_list = f"{tmp_directory}all_variants_{{gwas}}_chr{{chr}}_r2_{{r2_threshold}}.tmp",
+        header = clumped_header
+    threads: 1
+    resources:
+        mem = 10,
+        time = "1:00:00"
+    shell:
+        """
+        module load CBI plink/1.90b6.26
+
+        # this chromosome's variants, as the SNP and P columns PLINK clumps on
+        (
+            printf 'SNP\\tP\\n'
+            zcat {input.variants} \
+            | awk -F'\\t' -v chr="{wildcards.chr}" 'NR > 1 && $1 == chr {{print $3"\\t"$7}}'
+        ) > {params.variant_list}
+
+        if [ "$(wc -l < {params.variant_list})" -gt 1 ]; then
+            # PLINK writes no .clumped file when no variant forms a clump
+            plink \
+                --bfile {params.ld_reference_panel} \
+                --clump {params.variant_list} \
+                --clump-snp-field SNP \
+                --clump-field P \
+                --clump-p1 1 \
+                --clump-p2 1 \
+                --clump-r2 {wildcards.r2_threshold} \
+                --clump-kb 250 \
+                --out {params.out_prefix} \
+                --silent || true
+        fi
+
+        if [ ! -f {output} ]; then
+            echo "{params.header}" > {output}
+        fi
+
+        rm -f {params.variant_list}
+        """
+
+rule ld_clump_significant_introgressed_variants:
+    input:
+        variants = f"{introgressed_variants_directory}variants/significant_introgressed_GWAS_variants.txt.gz",
+        ld_reference_panel = lambda wildcards: multiext(
+            ld_reference_panel_prefix(wildcards), ".bed", ".bim", ".fam"
+        )
+    output:
+        temp(f"{introgressed_variants_directory}LD_clumped/chromosome_level/{{gwas}}_chr{{chr}}_r2_{{r2_threshold}}.clumped")
+    params:
+        ld_reference_panel = ld_reference_panel_prefix,
+        out_prefix = lambda wildcards, output: output[0].removesuffix(".clumped"),
+        variant_list = f"{tmp_directory}introgressed_variants_{{gwas}}_chr{{chr}}_r2_{{r2_threshold}}.tmp",
+        cancer = lambda wildcards: gwas_metadata[wildcards.gwas]["cancer"],
+        ancestry_group = lambda wildcards: gwas_metadata[wildcards.gwas]["ancestry_group"],
+        header = clumped_header
+    threads: 1
+    resources:
+        mem = 10,
+        time = "1:00:00"
+    shell:
+        """
+        module load CBI plink/1.90b6.26
+
+        # this GWAS's introgressed variants on this chromosome
+        (
+            printf 'SNP\\tP\\n'
+            zcat {input.variants} \
+            | awk -F'\\t' \
+                -v cancer="{params.cancer}" \
+                -v ancestry_group="{params.ancestry_group}" \
+                -v chr="{wildcards.chr}" \
+                '$1 == cancer && $2 == ancestry_group && $4 == chr {{print $3"\\t"$9}}'
+        ) > {params.variant_list}
+
+        if [ "$(wc -l < {params.variant_list})" -gt 1 ]; then
+            plink \
+                --bfile {params.ld_reference_panel} \
+                --clump {params.variant_list} \
+                --clump-snp-field SNP \
+                --clump-field P \
+                --clump-p1 1 \
+                --clump-p2 1 \
+                --clump-r2 {wildcards.r2_threshold} \
+                --clump-kb 250 \
+                --out {params.out_prefix} \
+                --silent || true
+        fi
+
+        if [ ! -f {output} ]; then
+            echo "{params.header}" > {output}
+        fi
+
+        rm -f {params.variant_list}
+        """
+
+rule concat_ld_clumped:
+    input:
+        lambda wildcards: expand(
+            f"{significant_variants_directory}{wildcards.variant_set}/LD_clumped/chromosome_level/"
+            f"{wildcards.gwas}_chr{{chr}}_r2_{wildcards.r2_threshold}.clumped",
+            chr = chromosomes
+        )
+    output:
+        f"{significant_variants_directory}{{variant_set}}/LD_clumped/{{gwas}}_r2_{{r2_threshold}}.clumped"
+    threads: 1
+    resources:
+        mem = 5,
+        time = "0:30:00"
+    shell:
+        """
+        # PLINK pads its columns with spaces, so the combined file is converted to tab-delimited
+        (
+            head -n 1 {input[0]} | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]\\+/\\t/g'
+            awk 'FNR > 1 && NF' {input} \
+            | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]\\+/\\t/g' \
+            | sort -V -k1,1 -k4,4n
+        ) > {output}
+        """

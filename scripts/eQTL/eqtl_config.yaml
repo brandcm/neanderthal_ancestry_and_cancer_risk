@@ -1,0 +1,37 @@
+# Variants and genes queried in GTEx by retrieve_gtex_eqtls.py.
+#
+# allele: the allele of interest at each variant (the Neanderthal allele, or
+#   the reintroduced ancestral allele for rs788464). Every effect in the
+#   outputs is oriented to it, so a positive NES means this allele increases
+#   expression.
+# signal: label for the credible set the variant leads, used in the figures.
+# focus_genes: genes whose effects are retrieved in every GTEx tissue,
+#   including non-significant ones, for the tissue-specificity panel.
+
+PTHLH:
+  variants:
+    - rsID: rs788464
+      allele: G
+      signal: CS3
+    - rsID: rs10843134
+      allele: G
+      signal: CS2
+  focus_genes:
+    - PTHLH
+    - CCDC91
+    - ENSG00000247934
+
+SLC24A4:
+  variants:
+    # Highest-PIP variant with a Neanderthal allele called by the maps; the
+    # variant plotted
+    - rsID: rs79342051
+      allele: T
+      signal: CS1
+    # A check only: its Neanderthal allele is not called by the maps and is
+    # inferred here as the derived allele, G
+    - rsID: rs12435365
+      allele: G
+      signal: CS1
+  focus_genes:
+    - SLC24A4

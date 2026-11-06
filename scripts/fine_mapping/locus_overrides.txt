@@ -1,0 +1,8 @@
+config_key	locus_id	window_size	L	reason
+prostate_cancer_EUR_Wang_GCST90274714	6_28485477	1000		MHC: a 2 Mb window overlaps the adjacent MHC loci and does not fit in memory
+prostate_cancer_EUR_Wang_GCST90274714	6_30741305	1000		MHC: a 2 Mb window overlaps the adjacent MHC loci and does not fit in memory
+prostate_cancer_EUR_Wang_GCST90274714	6_32154285	1000		MHC: a 2 Mb window overlaps the adjacent MHC loci and does not fit in memory
+prostate_cancer_EUR_Wang_GCST90274714	6_32977535	1000		MHC: a 2 Mb window overlaps the adjacent MHC loci and does not fit in memory
+lung_cancer_EUR_McKay_GCST004748	6_32335204	1000		MHC: a 2 Mb window overlaps the adjacent MHC loci and does not fit in memory
+gastric_cancer_EAS_Sakaue_GCST90018629	6_32990121	1000		MHC: a 2 Mb window overlaps the adjacent MHC loci and does not fit in memory
+prostate_cancer_EUR_Wang_GCST90274714	18_76715856	1000	NA	Near-edge flag driven by a credible set with no genome-wide significant variant; nearest significant variant is 353 kb from the window edge.

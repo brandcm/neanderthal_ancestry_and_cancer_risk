@@ -1,0 +1,111 @@
+basal_cell_carcinoma_EUR_Seviiri_GCST90137411:
+  ancestry_group: EUR
+  extra_flags: "--snp variant_id --N-cas 20791.0 --N-con 286893.0 --a1 effect_allele --a2 other_allele --p p_value --signed-sumstats beta,0"
+
+bladder_cancer_EUR_Rashkin_GCST90011817:
+  ancestry_group: EUR
+  extra_flags: "--snp variant_id --N-cas 2242.0 --N-con 410350.0 --p p_value --a1 effect_allele --a2 other_allele --signed-sumstats beta,0 --ignore n,odds_ratio,standard_error"
+
+breast_cancer_EAS_Jia_GCST90429846:
+  ancestry_group: EAS
+  extra_flags: "--snp rsid --N-cas 21319.0 --N-con 106116.0 --a1 effect_allele --a2 other_allele --p p_value --signed-sumstats beta,0 --ignore n,ref_allele,variant_id,HetPVal,hm_coordinate_conversion,hm_code"
+
+breast_cancer_EUR_Zhang_GCST001:
+  ancestry_group: EUR
+  extra_flags: "--snp rsID --N-cas 133384.0 --N-con 113789.0 --a1 Effect.Meta --a2 Baseline.Meta --p p.meta --signed-sumstats beta,0 --ignore var_name,Effect.Gwas,Baseline.Gwas,P.value.Gwas,beta.Gwas,Freq.Gwas,SNP.iCOGs,chr.iCOGs,Position.iCOGs,Effect.iCOGs,Baseline.iCOGs,EAFcontrols.iCOGs,EAFcases.iCOGs,r2.iCOGs,NumCalled.iCOGs,beta.iCOGs,SE.iCOGs,SE_LRT.iCOGs,chi2.iCOGs,LRT.iCOGs,P1df_risk_chi.iCOGs,P1df_risk_LRT.iCOGs,SNP.Onco,chr.Onco,Position.Onco,Effect.Onco,Baseline.Onco,EAFcontrols.Onco,EAFcases.Onco,r2.Onco,NumCalled.Onco,beta.Onco,SE.Onco,SE_LRT.Onco,chi2.Onco,LRT.Onco,P1df_risk_chi.Onco,P1df_risk_LRT.Onco,var.meta,sdE.meta,chi.meta,dir.meta"
+
+colorectal_cancer_EUR_Fernandez-Rozadilla_GCST90255675:
+  ancestry_group: EUR
+  extra_flags: "--snp variant_id --N-cas 78473.0 --N-con 107143.0 --a1 effect_allele --a2 other_allele --p p_value --signed-sumstats beta,0 --ignore I2"
+
+endometrial_cancer_EAS_Sakaue_GCST90018618:
+  ancestry_group: EAS
+  extra_flags: "--snp rsID --N-cas 1200.0 --N-con 60614.0 --p p_value --a1 effect_allele --a2 other_allele --signed-sumstats beta,0 --ignore variant_id,odds_ratio,ci_lower,ci_upper"
+
+endometrial_cancer_EUR_OMara_GCST006464:
+  ancestry_group: EUR
+  extra_flags: "--snp variant_id --N-cas 12906.0 --N-con 108979.0 --a1 effect_allele --a2 other_allele --p p_value --signed-sumstats beta,0 --ignore odds_ratio,ci_lower,ci_upper"
+
+esophageal_cancer_EAS_Sakaue_GCST90018621:
+  ancestry_group: EAS
+  extra_flags: "--snp rsID --N-cas 1388.0 --N-con 159201.0 --p p_value --a1 effect_allele --a2 other_allele --signed-sumstats beta,0 --ignore variant_id,odds_ratio,ci_lower,ci_upper"
+
+esophageal_cancer_EUR_Rashkin_GCST90011807:
+  ancestry_group: EUR
+  extra_flags: "--snp variant_id --N-cas 1091.0 --N-con 410350.0 --p p_value --a1 effect_allele --a2 other_allele --signed-sumstats beta,0 --ignore n,odds_ratio,standard_error"
+
+gastric_cancer_EAS_Sakaue_GCST90018629:
+  ancestry_group: EAS
+  extra_flags: "--snp rsID --N-cas 7921.0 --N-con 159201.0 --p p_value --a1 effect_allele --a2 other_allele --signed-sumstats beta,0 --ignore variant_id,odds_ratio,ci_lower,ci_upper"
+
+gastric_cancer_EUR_Zhou_GCST90435577:
+  ancestry_group: EUR
+  extra_flags: "--snp variant_id --N-cas 554.0 --N-con 393372.0 --a1 effect_allele --a2 other_allele --p p_value --signed-sumstats beta,0"
+
+liver_cancer_EAS_Sakaue_GCST90018583:
+  ancestry_group: EAS
+  extra_flags: "--snp rsID --N-cas 418.0 --N-con 159201.0 --p p_value --a1 effect_allele --a2 other_allele --signed-sumstats beta,0 --ignore variant_id,odds_ratio,ci_lower,ci_upper"
+
+liver_cancer_EUR_Zhou_GCST90435580:
+  ancestry_group: EUR
+  extra_flags: "--snp variant_id --N-cas 344.0 --N-con 393372.0 --a1 effect_allele --a2 other_allele --p p_value --signed-sumstats beta,0"
+
+lung_cancer_EAS_Sakaue_GCST90018655:
+  ancestry_group: EAS
+  extra_flags: "--snp rsID --N-cas 4444.0 --N-con 159201.0 --p p_value --a1 effect_allele --a2 other_allele --signed-sumstats beta,0 --ignore variant_id,odds_ratio,ci_lower,ci_upper"
+
+lung_cancer_EUR_McKay_GCST004748:
+  ancestry_group: EUR
+  extra_flags: "--snp variant_id --N-cas 29266.0 --N-con 56450.0 --a1 effect_allele --a2 other_allele --p p_value --signed-sumstats beta,0 --ignore odds_ratio,ci_lower,ci_upper,effect_allele_frequency"
+
+melanoma_EUR_Rashkin_GCST90011809:
+  ancestry_group: EUR
+  extra_flags: "--snp variant_id --N-cas 6777.0 --N-con 410350.0 --p p_value --a1 effect_allele --a2 other_allele --signed-sumstats beta,0 --ignore n,odds_ratio,standard_error"
+
+ovarian_cancer_EAS_Sakaue_GCST90018668:
+  ancestry_group: EAS
+  extra_flags: "--snp rsID --N-cas 843.0 --N-con 60614.0 --p p_value --a1 effect_allele --a2 other_allele --signed-sumstats beta,0 --ignore variant_id,odds_ratio,ci_lower,ci_upper"
+
+ovarian_cancer_EUR_Rashkin_GCST90011821:
+  ancestry_group: EUR
+  extra_flags: "--snp variant_id --N-cas 1259.0 --N-con 410350.0 --p p_value --a1 effect_allele --a2 other_allele --signed-sumstats beta,0 --ignore n,odds_ratio,standard_error"
+
+pancreatic_cancer_EAS_Sakaue_GCST90018673:
+  ancestry_group: EAS
+  extra_flags: "--snp rsID --N-cas 499.0 --N-con 159201.0 --p p_value --a1 effect_allele --a2 other_allele --signed-sumstats beta,0 --ignore variant_id,odds_ratio,ci_lower,ci_upper"
+
+pancreatic_cancer_EUR_Rashkin_GCST90011815:
+  ancestry_group: EUR
+  extra_flags: "--snp variant_id --N-cas 663.0 --N-con 410350.0 --p p_value --a1 effect_allele --a2 other_allele --signed-sumstats beta,0 --ignore n,odds_ratio,standard_error"
+
+prostate_cancer_EAS_Wang_GCST90274716:
+  ancestry_group: EAS
+  extra_flags: "--snp rsID --N-cas 10809 --N-con 95790 --a1 other_allele --a2 effect_allele --p p_value --signed-sumstats beta,0 --ignore reference_allele"
+
+prostate_cancer_EUR_Wang_GCST90274714:
+  ancestry_group: EUR
+  extra_flags: "--snp rsID --N-cas 122188 --N-con 604640 --a1 other_allele --a2 effect_allele --p p_value --signed-sumstats beta,0 --ignore reference_allele"
+
+renal_cancer_EAS_Purdue_GCST90320065:
+  ancestry_group: EAS
+  extra_flags: "--snp rsid --N-cas 621.0 --N-con 86796.0 --a1 effect_allele --a2 other_allele --p p_value --signed-sumstats beta,0"
+
+renal_cancer_EUR_Purdue_GCST90320057:
+  ancestry_group: EUR
+  extra_flags: "--snp rsid --N-cas 25890.0 --N-con 743585.0 --a1 effect_allele --a2 other_allele --p p_value --signed-sumstats beta,0"
+
+squamous_cell_carcinoma_EUR_Seviiri_GCST90137412:
+  ancestry_group: EUR
+  extra_flags: "--snp variant_id --N-cas 7402.0 --N-con 286892.0 --a1 effect_allele --a2 other_allele --p p_value --signed-sumstats beta,0"
+
+testicular_cancer_EUR_Zhou_GCST90435613:
+  ancestry_group: EUR
+  extra_flags: "--snp variant_id --N-cas 2981.0 --N-con 401788.0 --a1 effect_allele --a2 other_allele --p p_value --signed-sumstats beta,0"
+
+thyroid_cancer_EAS_Sakaue_GCST90018709:
+  ancestry_group: EAS
+  extra_flags: "--snp rsID --N-cas 361.0 --N-con 178362.0 --p p_value --a1 effect_allele --a2 other_allele --signed-sumstats beta,0 --ignore variant_id,odds_ratio,ci_lower,ci_upper"
+
+thyroid_cancer_EUR_Zhou_GCST90399736:
+  ancestry_group: EUR
+  extra_flags: "--snp rsid --N-cas 6015.0 --N-con 1333754.0 --a1 effect_allele --a2 other_allele --p p_value --signed-sumstats beta,0"
